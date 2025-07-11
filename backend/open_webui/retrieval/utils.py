@@ -407,7 +407,7 @@ def get_embedding_function(
         return lambda query, prefix=None, user=None: embedding_function.encode(
             query, **({"prompt": prefix} if prefix else {})
         ).tolist()
-    elif embedding_engine in ["ollama", "openai", "azure_openai"]:
+    elif embedding_engine in ["ollama", "openai", "azure_openai", "gemini"]:
         func = lambda query, prefix=None, user=None: generate_embeddings(
             engine=embedding_engine,
             model=embedding_model,
@@ -754,6 +754,59 @@ def generate_azure_openai_batch_embeddings(
         return None
 
 
+def generate_gemini_batch_embeddings(
+    model: str,
+    texts: list[str],
+    url: str,
+    key: str = "",
+    prefix: str = None,
+    user: UserModel = None,
+) -> Optional[list[list[float]]]:
+    try:
+        log.debug(
+            f"generate_gemini_batch_embeddings:model {model} batch size: {len(texts)}"
+        )
+        embeddings = []
+        for text in texts:
+            if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
+                content = f"{prefix}{text}"
+            else:
+                content = text
+            json_data = {
+                "content": {"parts": [{"text": content}]}
+            }
+            r = requests.post(
+                f"{url}/models/{model}:embedContent",
+                headers={
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": key,
+                    **(
+                        {
+                            "X-OpenWebUI-User-Name": user.name,
+                            "X-OpenWebUI-User-Id": user.id,
+                            "X-OpenWebUI-User-Email": user.email,
+                            "X-OpenWebUI-User-Role": user.role,
+                        }
+                        if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                        else {}
+                    ),
+                },
+                json=json_data,
+            )
+            r.raise_for_status()
+            data = r.json()
+            if "embedding" in data:
+                embeddings.append(data["embedding"]["values"])
+            elif "predictions" in data:
+                embeddings.append(data["predictions"][0]["embedding"]["values"])
+            else:
+                raise Exception("Something went wrong :/")
+        return embeddings
+    except Exception as e:
+        log.exception(f"Error generating gemini batch embeddings: {e}")
+        return None
+
+
 def generate_ollama_batch_embeddings(
     model: str,
     texts: list[str],
@@ -842,6 +895,16 @@ def generate_embeddings(
             url,
             key,
             azure_api_version,
+            prefix,
+            user,
+        )
+        return embeddings[0] if isinstance(text, str) else embeddings
+    elif engine == "gemini":
+        embeddings = generate_gemini_batch_embeddings(
+            model,
+            text if isinstance(text, list) else [text],
+            url,
+            key,
             prefix,
             user,
         )

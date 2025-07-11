@@ -185,17 +185,23 @@ type OpenAIConfigForm = {
 };
 
 type AzureOpenAIConfigForm = {
-	key: string;
-	url: string;
-	version: string;
+        key: string;
+        url: string;
+        version: string;
+};
+
+type GeminiConfigForm = {
+        key: string;
+        url: string;
 };
 
 type EmbeddingModelUpdateForm = {
-	openai_config?: OpenAIConfigForm;
-	azure_openai_config?: AzureOpenAIConfigForm;
-	embedding_engine: string;
-	embedding_model: string;
-	embedding_batch_size?: number;
+        openai_config?: OpenAIConfigForm;
+        azure_openai_config?: AzureOpenAIConfigForm;
+        gemini_config?: GeminiConfigForm;
+        embedding_engine: string;
+        embedding_model: string;
+        embedding_batch_size?: number;
 };
 
 export const updateEmbeddingConfig = async (token: string, payload: EmbeddingModelUpdateForm) => {
