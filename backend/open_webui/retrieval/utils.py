@@ -776,7 +776,8 @@ def generate_gemini_batch_embeddings(
         embeddings = []
         
         # Process texts in batches to avoid API limits
-        batch_size = 5  # Gemini API has limits on batch size
+        from open_webui.config import RAG_EMBEDDING_BATCH_SIZE
+        batch_size = RAG_EMBEDDING_BATCH_SIZE.value  # Use configuration instead of hard-coded value
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i + batch_size]
             batch_embeddings = []
