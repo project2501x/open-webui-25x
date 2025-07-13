@@ -423,16 +423,23 @@ def get_embedding_function(
             if isinstance(query, list):
                 embeddings = []
                 for i in range(0, len(query), embedding_batch_size):
-                    embeddings.extend(
-                        func(
-                            query[i : i + embedding_batch_size],
-                            prefix=prefix,
-                            user=user,
-                        )
+                    batch_embeddings = func(
+                        query[i : i + embedding_batch_size],
+                        prefix=prefix,
+                        user=user,
                     )
+                    if batch_embeddings is not None:
+                        embeddings.extend(batch_embeddings)
+                    else:
+                        log.error(f"Embedding function returned None for batch {i}")
+                        raise Exception("Embedding generation failed - returned None")
                 return embeddings
             else:
-                return func(query, prefix, user)
+                result = func(query, prefix, user)
+                if result is None:
+                    log.error("Embedding function returned None for single query")
+                    raise Exception("Embedding generation failed - returned None")
+                return result
 
         return lambda query, prefix=None, user=None: generate_multiple(
             query, prefix, user, func
@@ -767,40 +774,53 @@ def generate_gemini_batch_embeddings(
             f"generate_gemini_batch_embeddings:model {model} batch size: {len(texts)}"
         )
         embeddings = []
-        for text in texts:
-            if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
-                content = f"{prefix}{text}"
-            else:
-                content = text
-            json_data = {
-                "content": {"parts": [{"text": content}]}
-            }
-            r = requests.post(
-                f"{url}/models/{model}:embedContent",
-                headers={
-                    "Content-Type": "application/json",
-                    "x-goog-api-key": key,
-                    **(
-                        {
-                            "X-OpenWebUI-User-Name": user.name,
-                            "X-OpenWebUI-User-Id": user.id,
-                            "X-OpenWebUI-User-Email": user.email,
-                            "X-OpenWebUI-User-Role": user.role,
-                        }
-                        if ENABLE_FORWARD_USER_INFO_HEADERS and user
-                        else {}
-                    ),
-                },
-                json=json_data,
-            )
-            r.raise_for_status()
-            data = r.json()
-            if "embedding" in data:
-                embeddings.append(data["embedding"]["values"])
-            elif "predictions" in data:
-                embeddings.append(data["predictions"][0]["embedding"]["values"])
-            else:
-                raise Exception("Something went wrong :/")
+        
+        # Process texts in batches to avoid API limits
+        batch_size = 5  # Gemini API has limits on batch size
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            batch_embeddings = []
+            
+            for text in batch_texts:
+                if isinstance(RAG_EMBEDDING_PREFIX_FIELD_NAME, str) and isinstance(prefix, str):
+                    content = f"{prefix}{text}"
+                else:
+                    content = text
+                    
+                json_data = {
+                    "content": {"parts": [{"text": content}]}
+                }
+                
+                r = requests.post(
+                    f"{url}/models/{model}:embedContent",
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": key,
+                        **(
+                            {
+                                "X-OpenWebUI-User-Name": user.name,
+                                "X-OpenWebUI-User-Id": user.id,
+                                "X-OpenWebUI-User-Email": user.email,
+                                "X-OpenWebUI-User-Role": user.role,
+                            }
+                            if ENABLE_FORWARD_USER_INFO_HEADERS and user
+                            else {}
+                        ),
+                    },
+                    json=json_data,
+                )
+                r.raise_for_status()
+                data = r.json()
+                
+                if "embedding" in data:
+                    batch_embeddings.append(data["embedding"]["values"])
+                elif "predictions" in data:
+                    batch_embeddings.append(data["predictions"][0]["embedding"]["values"])
+                else:
+                    raise Exception("Unexpected response format from Gemini API")
+            
+            embeddings.extend(batch_embeddings)
+            
         return embeddings
     except Exception as e:
         log.exception(f"Error generating gemini batch embeddings: {e}")
@@ -881,11 +901,15 @@ def generate_embeddings(
                 "user": user,
             }
         )
+        if embeddings is None:
+            raise Exception("Ollama embedding generation failed")
         return embeddings[0] if isinstance(text, str) else embeddings
     elif engine == "openai":
         embeddings = generate_openai_batch_embeddings(
             model, text if isinstance(text, list) else [text], url, key, prefix, user
         )
+        if embeddings is None:
+            raise Exception("OpenAI embedding generation failed")
         return embeddings[0] if isinstance(text, str) else embeddings
     elif engine == "azure_openai":
         azure_api_version = kwargs.get("azure_api_version", "")
@@ -898,6 +922,8 @@ def generate_embeddings(
             prefix,
             user,
         )
+        if embeddings is None:
+            raise Exception("Azure OpenAI embedding generation failed")
         return embeddings[0] if isinstance(text, str) else embeddings
     elif engine == "gemini":
         embeddings = generate_gemini_batch_embeddings(
@@ -908,7 +934,11 @@ def generate_embeddings(
             prefix,
             user,
         )
+        if embeddings is None:
+            raise Exception("Gemini embedding generation failed")
         return embeddings[0] if isinstance(text, str) else embeddings
+    else:
+        raise ValueError(f"Unknown embedding engine: {engine}")
 
 
 import operator

@@ -112,7 +112,9 @@
 		console.debug('Update embedding model attempt:', embeddingModel);
 
 		updateEmbeddingModelLoading = true;
-		const res = await updateEmbeddingConfig(localStorage.token, {
+		
+		// Debug: Log the payload being sent
+		const payload = {
 			embedding_engine: embeddingEngine,
 			embedding_model: embeddingModel,
 			embedding_batch_size: embeddingBatchSize,
@@ -124,16 +126,20 @@
 				key: OpenAIKey,
 				url: OpenAIUrl
 			},
-                        azure_openai_config: {
-                                key: AzureOpenAIKey,
-                                url: AzureOpenAIUrl,
-                                version: AzureOpenAIVersion
-                        },
-                        gemini_config: {
-                                key: GeminiKey,
-                                url: GeminiUrl
-                        }
-                }).catch(async (error) => {
+			azure_openai_config: {
+				key: AzureOpenAIKey,
+				url: AzureOpenAIUrl,
+				version: AzureOpenAIVersion
+			},
+			gemini_config: {
+				key: GeminiKey,
+				url: GeminiUrl
+			}
+		};
+		
+		console.debug('Embedding config payload:', payload);
+		
+		const res = await updateEmbeddingConfig(localStorage.token, payload).catch(async (error) => {
 			toast.error(`${error}`);
 			await setEmbeddingConfig();
 			return null;
@@ -724,7 +730,8 @@
                 } else if (e.target.value === 'azure_openai') {
                         embeddingModel = 'text-embedding-3-small';
                 } else if (e.target.value === 'gemini') {
-                        embeddingModel = 'Gemini-Embedding-001';
+                        embeddingModel = 'gemini-embedding-exp-03-07';
+                        GeminiUrl = 'https://generativelanguage.googleapis.com/v1beta/models/';
                 } else if (e.target.value === '') {
                         embeddingModel = 'sentence-transformers/all-MiniLM-L6-v2';
                 }

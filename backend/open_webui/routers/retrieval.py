@@ -354,9 +354,9 @@ async def update_embedding_config(
                     request.app.state.config.RAG_OLLAMA_BASE_URL
                     if request.app.state.config.RAG_EMBEDDING_ENGINE == "ollama"
                     else (
-                        request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
-                        if request.app.state.config.RAG_EMBEDDING_ENGINE == "azure_openai"
-                        else request.app.state.config.RAG_GEMINI_API_BASE_URL
+                        request.app.state.config.RAG_GEMINI_API_BASE_URL
+                        if request.app.state.config.RAG_EMBEDDING_ENGINE == "gemini"
+                        else request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
                     )
                 )
             ),
@@ -367,9 +367,9 @@ async def update_embedding_config(
                     request.app.state.config.RAG_OLLAMA_API_KEY
                     if request.app.state.config.RAG_EMBEDDING_ENGINE == "ollama"
                     else (
-                        request.app.state.config.RAG_AZURE_OPENAI_API_KEY
-                        if request.app.state.config.RAG_EMBEDDING_ENGINE == "azure_openai"
-                        else request.app.state.config.RAG_GEMINI_API_KEY
+                        request.app.state.config.RAG_GEMINI_API_KEY
+                        if request.app.state.config.RAG_EMBEDDING_ENGINE == "gemini"
+                        else request.app.state.config.RAG_AZURE_OPENAI_API_KEY
                     )
                 )
             ),
@@ -1247,7 +1247,11 @@ def save_docs_to_vector_db(
                 else (
                     request.app.state.config.RAG_OLLAMA_BASE_URL
                     if request.app.state.config.RAG_EMBEDDING_ENGINE == "ollama"
-                    else request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
+                    else (
+                        request.app.state.config.RAG_GEMINI_API_BASE_URL
+                        if request.app.state.config.RAG_EMBEDDING_ENGINE == "gemini"
+                        else request.app.state.config.RAG_AZURE_OPENAI_BASE_URL
+                    )
                 )
             ),
             (
@@ -1256,7 +1260,11 @@ def save_docs_to_vector_db(
                 else (
                     request.app.state.config.RAG_OLLAMA_API_KEY
                     if request.app.state.config.RAG_EMBEDDING_ENGINE == "ollama"
-                    else request.app.state.config.RAG_AZURE_OPENAI_API_KEY
+                    else (
+                        request.app.state.config.RAG_GEMINI_API_KEY
+                        if request.app.state.config.RAG_EMBEDDING_ENGINE == "gemini"
+                        else request.app.state.config.RAG_AZURE_OPENAI_API_KEY
+                    )
                 )
             ),
             request.app.state.config.RAG_EMBEDDING_BATCH_SIZE,
