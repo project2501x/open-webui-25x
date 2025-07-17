@@ -57,10 +57,11 @@
 	import Commands from './MessageInput/Commands.svelte';
 	import ToolServersModal from './ToolServersModal.svelte';
 
-	import RichTextInput from '../common/RichTextInput.svelte';
+	import TiptapEditor from '../common/TiptapEditor.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import FileItem from '../common/FileItem.svelte';
 	import Image from '../common/Image.svelte';
+	import RichTextInput from '../common/RichTextInput.svelte';
 
 	import XMark from '../icons/XMark.svelte';
 	import Headphone from '../icons/Headphone.svelte';
@@ -107,6 +108,9 @@
 	let inputVariables = {};
 	let inputVariableValues = {};
 
+	let tiptapContent = '';
+	let tiptapEditor;
+
 	$: onChange({
 		prompt,
 		files: files
@@ -128,7 +132,14 @@
 	const inputVariableHandler = async (text: string) => {
 		inputVariables = extractInputVariables(text);
 		if (Object.keys(inputVariables).length > 0) {
-			showInputVariablesModal = true;
+			if ($settings?.richTextInput ?? true) {
+				// For TiptapEditor, variables are handled inline
+				// The editor will automatically detect and convert {{VARIABLE}} to inline inputs
+				console.log('Variables detected for inline input:', inputVariables);
+			} else {
+				// For RichTextInput, show the modal
+				showInputVariablesModal = true;
+			}
 		}
 	};
 
@@ -218,51 +229,28 @@
 	const replaceVariables = (variables: Record<string, any>) => {
 		console.log('Replacing variables:', variables);
 
-		const chatInput = document.getElementById('chat-input');
-
-		if (chatInput) {
-			if ($settings?.richTextInput ?? true) {
-				chatInputElement.replaceVariables(variables);
-				chatInputElement.focus();
-			} else {
-				// Get current value from the input element
-				let currentValue = chatInput.value || '';
-
-				// Replace template variables using regex
-				const updatedValue = currentValue.replace(
-					/{{\s*([^|}]+)(?:\|[^}]*)?\s*}}/g,
-					(match, varName) => {
-						const trimmedVarName = varName.trim();
-						return variables.hasOwnProperty(trimmedVarName)
-							? String(variables[trimmedVarName])
-							: match;
-					}
-				);
-
-				// Update the input value
-				chatInput.value = updatedValue;
-				chatInput.focus();
-				chatInput.dispatchEvent(new Event('input', { bubbles: true }));
-			}
+		if ($settings?.richTextInput ?? true) {
+			// Use TiptapEditor
+			tiptapEditor?.replaceVariables(variables);
+			tiptapEditor?.focus();
+		} else {
+			// Use RichTextInput
+			chatInputElement?.replaceVariables(variables);
+			chatInputElement?.focus();
 		}
 	};
 
 	export const setText = async (text?: string) => {
-		const chatInput = document.getElementById('chat-input');
+		text = await textVariableHandler(text || '');
 
-		if (chatInput) {
-			text = await textVariableHandler(text || '');
-
-			if ($settings?.richTextInput ?? true) {
-				chatInputElement?.setText(text);
-				chatInputElement?.focus();
-			} else {
-				chatInput.value = text;
-				prompt = text;
-
-				chatInput.focus();
-				chatInput.dispatchEvent(new Event('input'));
-			}
+		if ($settings?.richTextInput ?? true) {
+			// Use TiptapEditor
+			tiptapEditor?.setText(text);
+			tiptapEditor?.focus();
+		} else {
+			// Use RichTextInput
+			chatInputElement?.setText(text);
+			chatInputElement?.focus();
 		}
 	};
 
@@ -277,60 +265,37 @@
 			return leftWord + rightWord;
 		};
 
-		const chatInput = document.getElementById('chat-input');
-		let word = '';
-
-		if (chatInput) {
-			if ($settings?.richTextInput ?? true) {
-				word = chatInputElement?.getWordAtDocPos();
-			} else {
-				const cursor = chatInput ? chatInput.selectionStart : prompt.length;
-				word = getWordAtCursor(prompt, cursor);
-			}
+		if ($settings?.richTextInput ?? true) {
+			// Use TiptapEditor
+			return tiptapEditor?.getWordAtDocPos() || '';
+		} else {
+			// Use RichTextInput
+			return chatInputElement?.getWordAtDocPos() || '';
 		}
-
-		return word;
 	};
 
 	const replaceCommandWithText = (text) => {
-		const getWordBoundsAtCursor = (text, cursor) => {
-			let start = cursor,
-				end = cursor;
-			while (start > 0 && !/\s/.test(text[start - 1])) --start;
-			while (end < text.length && !/\s/.test(text[end])) ++end;
-			return { start, end };
-		};
-
-		const chatInput = document.getElementById('chat-input');
-		if (!chatInput) return;
-
 		if ($settings?.richTextInput ?? true) {
-			chatInputElement?.replaceCommandWithText(text);
+			// Use TiptapEditor
+			tiptapEditor?.replaceCommandWithText(text);
 		} else {
-			const cursor = chatInput.selectionStart;
-			const { start, end } = getWordBoundsAtCursor(prompt, cursor);
-			prompt = prompt.slice(0, start) + text + prompt.slice(end);
-			chatInput.focus();
-			chatInput.setSelectionRange(start + text.length, start + text.length);
+			// Use RichTextInput
+			chatInputElement?.replaceCommandWithText(text);
 		}
 	};
 
 	const insertTextAtCursor = async (text: string) => {
-		const chatInput = document.getElementById('chat-input');
-		if (!chatInput) return;
-
 		text = await textVariableHandler(text);
 
 		if (command) {
 			replaceCommandWithText(text);
 		} else {
 			if ($settings?.richTextInput ?? true) {
-				chatInputElement?.insertContent(text);
+				// Use TiptapEditor
+				tiptapEditor?.insertContent(text);
 			} else {
-				const cursor = chatInput.selectionStart;
-				prompt = prompt.slice(0, cursor) + text + prompt.slice(cursor);
-				chatInput.focus();
-				chatInput.setSelectionRange(cursor + text.length, cursor + text.length);
+				// Use RichTextInput
+				chatInputElement?.insertContent(text);
 			}
 		}
 
@@ -341,30 +306,10 @@
 		}
 
 		await tick();
-		if (chatInput) {
-			chatInput.focus();
-			chatInput.dispatchEvent(new Event('input'));
-
-			const words = extractCurlyBraceWords(prompt);
-
-			if (words.length > 0) {
-				const word = words.at(0);
-				await tick();
-
-				if (!($settings?.richTextInput ?? true)) {
-					// Move scroll to the first word
-					chatInput.setSelectionRange(word.startIndex, word.endIndex + 1);
-					chatInput.focus();
-
-					const selectionRow =
-						(word?.startIndex - (word?.startIndex % chatInput.cols)) / chatInput.cols;
-					const lineHeight = chatInput.clientHeight / chatInput.rows;
-
-					chatInput.scrollTop = lineHeight * selectionRow;
-				}
-			} else {
-				chatInput.scrollTop = chatInput.scrollHeight;
-			}
+		if ($settings?.richTextInput ?? true) {
+			tiptapEditor?.focus();
+		} else {
+			chatInputElement?.focus();
 		}
 	};
 
@@ -803,14 +748,18 @@
 
 <FilesOverlay show={dragged} />
 <ToolServersModal bind:show={showTools} {selectedToolIds} />
-<InputVariablesModal
-	bind:show={showInputVariablesModal}
-	variables={inputVariables}
-	onSave={(variableValues) => {
-		inputVariableValues = { ...inputVariableValues, ...variableValues };
-		replaceVariables(inputVariableValues);
-	}}
-/>
+
+{#if !($settings?.richTextInput ?? true)}
+	<!-- Only show InputVariablesModal for RichTextInput -->
+	<InputVariablesModal
+		bind:show={showInputVariablesModal}
+		variables={inputVariables}
+		onSave={(variableValues) => {
+			inputVariableValues = { ...inputVariableValues, ...variableValues };
+			replaceVariables(inputVariableValues);
+		}}
+	/>
+{/if}
 
 {#if loaded}
 	<div class="w-full font-primary">
@@ -976,8 +925,11 @@
 						<form
 							class="w-full flex flex-col gap-1.5"
 							on:submit|preventDefault={() => {
-								// check if selectedModels support image input
-								dispatch('submit', prompt);
+								// Get content from the appropriate editor
+								const content = ($settings?.richTextInput ?? true) 
+									? tiptapContent 
+									: prompt;
+								dispatch('submit', content);
 							}}
 						>
 							<div
@@ -1075,6 +1027,155 @@
 
 								<div class="px-2.5">
 									{#if $settings?.richTextInput ?? true}
+										<!-- Use TiptapEditor for basic chat input with inline variable input -->
+										<TiptapEditor
+											bind:this={tiptapEditor}
+											bind:content={prompt}
+											placeholder={placeholder ? placeholder : $i18n.t('Send a Message')}
+											autofocus={true}
+											onKeydown={async (e) => {
+												const isCtrlPressed = e.ctrlKey || e.metaKey;
+												const commandsContainerElement = document.getElementById('commands-container');
+
+												if (e.key === 'Escape') {
+													stopResponse();
+												}
+
+												// Command/Ctrl + Shift + Enter to submit a message pair
+												if (isCtrlPressed && e.key === 'Enter' && e.shiftKey) {
+													e.preventDefault();
+													createMessagePair(prompt);
+												}
+
+												// Check if Ctrl + R is pressed
+												if (prompt === '' && isCtrlPressed && e.key.toLowerCase() === 'r') {
+													e.preventDefault();
+													console.log('regenerate');
+
+													const regenerateButton = [
+														...document.getElementsByClassName('regenerate-response-button')
+													]?.at(-1);
+
+													regenerateButton?.click();
+												}
+
+												if (prompt === '' && e.key == 'ArrowUp') {
+													e.preventDefault();
+
+													const userMessageElement = [
+														...document.getElementsByClassName('user-message')
+													]?.at(-1);
+
+													if (userMessageElement) {
+														userMessageElement.scrollIntoView({ block: 'center' });
+														const editButton = [
+															...document.getElementsByClassName('edit-user-message-button')
+														]?.at(-1);
+
+														editButton?.click();
+													}
+												}
+
+												if (commandsContainerElement) {
+													if (commandsContainerElement && e.key === 'ArrowUp') {
+														e.preventDefault();
+														commandsElement.selectUp();
+
+														const commandOptionButton = [
+															...document.getElementsByClassName('selected-command-option-button')
+														]?.at(-1);
+														commandOptionButton.scrollIntoView({ block: 'center' });
+													}
+
+													if (commandsContainerElement && e.key === 'ArrowDown') {
+														e.preventDefault();
+														commandsElement.selectDown();
+
+														const commandOptionButton = [
+															...document.getElementsByClassName('selected-command-option-button')
+														]?.at(-1);
+														commandOptionButton.scrollIntoView({ block: 'center' });
+													}
+
+													if (commandsContainerElement && e.key === 'Tab') {
+														e.preventDefault();
+
+														const commandOptionButton = [
+															...document.getElementsByClassName('selected-command-option-button')
+														]?.at(-1);
+
+														commandOptionButton?.click();
+													}
+
+													if (commandsContainerElement && e.key === 'Enter') {
+														e.preventDefault();
+
+														const commandOptionButton = [
+															...document.getElementsByClassName('selected-command-option-button')
+														]?.at(-1);
+
+														if (commandOptionButton) {
+															commandOptionButton?.click();
+														} else {
+															document.getElementById('send-message-button')?.click();
+														}
+													}
+												} else {
+													if (
+														!$mobile ||
+														!(
+															'ontouchstart' in window ||
+															navigator.maxTouchPoints > 0 ||
+															navigator.msMaxTouchPoints > 0
+														)
+													) {
+														if (isComposing) {
+															return;
+														}
+
+														// Uses keyCode '13' for Enter key for chinese/japanese keyboards.
+														//
+														// Depending on the user's settings, it will send the message
+														// either when Enter is pressed or when Ctrl+Enter is pressed.
+														const enterPressed =
+															($settings?.ctrlEnterToSend ?? false)
+																? (e.key === 'Enter' || e.keyCode === 13) && isCtrlPressed
+																: (e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey;
+
+														if (enterPressed) {
+															e.preventDefault();
+															if (prompt !== '' || files.length > 0) {
+																dispatch('submit', prompt);
+															}
+														}
+													}
+												}
+
+												if (e.key === 'Escape') {
+													console.log('Escape');
+													atSelectedModel = undefined;
+													selectedToolIds = [];
+													selectedFilterIds = [];
+													webSearchEnabled = false;
+													imageGenerationEnabled = false;
+													codeInterpreterEnabled = false;
+												}
+											}}
+											on:update={(e) => {
+												tiptapContent = e.detail.text;
+												prompt = e.detail.text;
+												command = getCommand();
+												
+												// Check for variables and convert to inline inputs
+												const variables = extractInputVariables(prompt);
+												if (Object.keys(variables).length > 0) {
+													// For TiptapEditor, we'll handle variables inline
+													// The editor will automatically detect and convert {{VARIABLE}} to inline inputs
+												}
+											}}
+										/>
+									{:else}
+										<!-- Use RichTextInput for advanced features or when richTextInput is disabled -->
 										<div
 											class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent dark:text-gray-100 outline-hidden w-full pt-2.5 pb-[5px] px-1 resize-none h-fit max-h-80 overflow-auto"
 											id="chat-input-container"
@@ -1097,7 +1198,6 @@
 															navigator.maxTouchPoints > 0 ||
 															navigator.msMaxTouchPoints > 0
 														))}
-												placeholder={placeholder ? placeholder : $i18n.t('Send a Message')}
 												largeTextAsFile={($settings?.largeTextAsFile ?? false) && !shiftKey}
 												autocomplete={$config?.features?.enable_autocomplete_generation &&
 													($settings?.promptAutocomplete ?? false)}
@@ -1250,7 +1350,6 @@
 														atSelectedModel = undefined;
 														selectedToolIds = [];
 														selectedFilterIds = [];
-
 														webSearchEnabled = false;
 														imageGenerationEnabled = false;
 														codeInterpreterEnabled = false;
@@ -1299,245 +1398,6 @@
 												}}
 											/>
 										</div>
-									{:else}
-										<textarea
-											id="chat-input"
-											dir={$settings?.chatDirection ?? 'auto'}
-											bind:this={chatInputElement}
-											class="scrollbar-hidden bg-transparent dark:text-gray-200 outline-hidden w-full pt-3 px-1 resize-none"
-											placeholder={placeholder ? placeholder : $i18n.t('Send a Message')}
-											bind:value={prompt}
-											on:input={() => {
-												command = getCommand();
-											}}
-											on:click={() => {
-												command = getCommand();
-											}}
-											on:compositionstart={() => (isComposing = true)}
-											on:compositionend={() => (isComposing = false)}
-											on:keydown={async (e) => {
-												const isCtrlPressed = e.ctrlKey || e.metaKey; // metaKey is for Cmd key on Mac
-
-												const commandsContainerElement =
-													document.getElementById('commands-container');
-
-												if (e.key === 'Escape') {
-													stopResponse();
-												}
-
-												// Command/Ctrl + Shift + Enter to submit a message pair
-												if (isCtrlPressed && e.key === 'Enter' && e.shiftKey) {
-													e.preventDefault();
-													createMessagePair(prompt);
-												}
-
-												// Check if Ctrl + R is pressed
-												if (prompt === '' && isCtrlPressed && e.key.toLowerCase() === 'r') {
-													e.preventDefault();
-													console.log('regenerate');
-
-													const regenerateButton = [
-														...document.getElementsByClassName('regenerate-response-button')
-													]?.at(-1);
-
-													regenerateButton?.click();
-												}
-
-												if (prompt === '' && e.key == 'ArrowUp') {
-													e.preventDefault();
-
-													const userMessageElement = [
-														...document.getElementsByClassName('user-message')
-													]?.at(-1);
-
-													const editButton = [
-														...document.getElementsByClassName('edit-user-message-button')
-													]?.at(-1);
-
-													console.log(userMessageElement);
-
-													userMessageElement?.scrollIntoView({ block: 'center' });
-													editButton?.click();
-												}
-
-												if (commandsContainerElement) {
-													if (commandsContainerElement && e.key === 'ArrowUp') {
-														e.preventDefault();
-														commandsElement.selectUp();
-
-														const container = document.getElementById('command-options-container');
-														const commandOptionButton = [
-															...document.getElementsByClassName('selected-command-option-button')
-														]?.at(-1);
-
-														if (commandOptionButton && container) {
-															const elTop = commandOptionButton.offsetTop;
-															const elHeight = commandOptionButton.offsetHeight;
-															const containerHeight = container.clientHeight;
-
-															// Center the selected button in the container
-															container.scrollTop = elTop - containerHeight / 2 + elHeight / 2;
-														}
-													}
-
-													if (commandsContainerElement && e.key === 'ArrowDown') {
-														e.preventDefault();
-														commandsElement.selectDown();
-
-														const container = document.getElementById('command-options-container');
-														const commandOptionButton = [
-															...document.getElementsByClassName('selected-command-option-button')
-														]?.at(-1);
-
-														if (commandOptionButton && container) {
-															const elTop = commandOptionButton.offsetTop;
-															const elHeight = commandOptionButton.offsetHeight;
-															const containerHeight = container.clientHeight;
-
-															// Center the selected button in the container
-															container.scrollTop = elTop - containerHeight / 2 + elHeight / 2;
-														}
-													}
-
-													if (commandsContainerElement && e.key === 'Enter') {
-														e.preventDefault();
-
-														const commandOptionButton = [
-															...document.getElementsByClassName('selected-command-option-button')
-														]?.at(-1);
-
-														if (e.shiftKey) {
-															prompt = `${prompt}\n`;
-														} else if (commandOptionButton) {
-															commandOptionButton?.click();
-														} else {
-															document.getElementById('send-message-button')?.click();
-														}
-													}
-
-													if (commandsContainerElement && e.key === 'Tab') {
-														e.preventDefault();
-
-														const commandOptionButton = [
-															...document.getElementsByClassName('selected-command-option-button')
-														]?.at(-1);
-
-														commandOptionButton?.click();
-													}
-												} else {
-													if (
-														!$mobile ||
-														!(
-															'ontouchstart' in window ||
-															navigator.maxTouchPoints > 0 ||
-															navigator.msMaxTouchPoints > 0
-														)
-													) {
-														if (isComposing) {
-															return;
-														}
-
-														// Prevent Enter key from creating a new line
-														const isCtrlPressed = e.ctrlKey || e.metaKey;
-														const enterPressed =
-															($settings?.ctrlEnterToSend ?? false)
-																? (e.key === 'Enter' || e.keyCode === 13) && isCtrlPressed
-																: (e.key === 'Enter' || e.keyCode === 13) && !e.shiftKey;
-
-														if (enterPressed) {
-															e.preventDefault();
-														}
-
-														// Submit the prompt when Enter key is pressed
-														if ((prompt !== '' || files.length > 0) && enterPressed) {
-															dispatch('submit', prompt);
-														}
-													}
-												}
-
-												if (e.key === 'Tab') {
-													const words = extractCurlyBraceWords(prompt);
-
-													if (words.length > 0) {
-														const word = words.at(0);
-
-														if (word && e.target instanceof HTMLTextAreaElement) {
-															// Prevent default tab behavior
-															e.preventDefault();
-															e.target.setSelectionRange(word?.startIndex, word.endIndex + 1);
-															e.target.focus();
-
-															const selectionRow =
-																(word?.startIndex - (word?.startIndex % e.target.cols)) /
-																e.target.cols;
-															const lineHeight = e.target.clientHeight / e.target.rows;
-
-															e.target.scrollTop = lineHeight * selectionRow;
-														}
-													}
-
-													e.target.style.height = '';
-													e.target.style.height = Math.min(e.target.scrollHeight, 320) + 'px';
-												}
-
-												if (e.key === 'Escape') {
-													console.log('Escape');
-													atSelectedModel = undefined;
-													selectedToolIds = [];
-													selectedFilterIds = [];
-													webSearchEnabled = false;
-													imageGenerationEnabled = false;
-													codeInterpreterEnabled = false;
-												}
-											}}
-											rows="1"
-											on:input={async (e) => {
-												e.target.style.height = '';
-												e.target.style.height = Math.min(e.target.scrollHeight, 320) + 'px';
-											}}
-											on:focus={async (e) => {
-												e.target.style.height = '';
-												e.target.style.height = Math.min(e.target.scrollHeight, 320) + 'px';
-											}}
-											on:paste={async (e) => {
-												const clipboardData = e.clipboardData || window.clipboardData;
-
-												if (clipboardData && clipboardData.items) {
-													for (const item of clipboardData.items) {
-														if (item.type.indexOf('image') !== -1) {
-															const blob = item.getAsFile();
-															const reader = new FileReader();
-
-															reader.onload = function (e) {
-																files = [
-																	...files,
-																	{
-																		type: 'image',
-																		url: `${e.target.result}`
-																	}
-																];
-															};
-
-															reader.readAsDataURL(blob);
-														} else if (item.type === 'text/plain') {
-															if (($settings?.largeTextAsFile ?? false) && !shiftKey) {
-																const text = clipboardData.getData('text/plain');
-
-																if (text.length > PASTED_TEXT_CHARACTER_LIMIT) {
-																	e.preventDefault();
-																	const blob = new Blob([text], { type: 'text/plain' });
-																	const file = new File([blob], `Pasted_Text_${Date.now()}.txt`, {
-																		type: 'text/plain'
-																	});
-
-																	await uploadFileHandler(file, true);
-																}
-															}
-														}
-													}
-												}
-											}}
-										/>
 									{/if}
 								</div>
 
